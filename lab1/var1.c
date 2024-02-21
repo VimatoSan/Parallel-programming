@@ -6,13 +6,11 @@
 
 
 #define BEGIN_ACCURACY 1
-#define N 700
+#define N 500
 #define TAU 0.0001
 #define EPSILON 0.01
 #define RANK_ROOT 0
 
-
-// TODO: Проверить корректность вычислений
 
 void print_matrix(double* matrix, int width, int height) {
 	for (int i = 0; i < height; ++i) {
@@ -22,6 +20,7 @@ void print_matrix(double* matrix, int width, int height) {
 	}
 }
 
+
 int calculate_chunk_size(int rank, int size) {
 	int chunk_size = N / size;
 	if (rank < N % size) {
@@ -30,6 +29,7 @@ int calculate_chunk_size(int rank, int size) {
 	return chunk_size;
 }
 
+
 int calculate_offlset(int rank, int size) {
 	int offset = 0;
 	for (int i = 0; i < rank; i++) {
@@ -37,6 +37,7 @@ int calculate_offlset(int rank, int size) {
 	}
 	return offset;
 }
+
 
 void vector_sub_vector(double* vector_a, double* vector_b, double *result, int offset_a, int offset_b, int size) {
 	for (int i = 0; i < size; ++i) {
@@ -49,6 +50,7 @@ void vector_mult_scalar(double* vector, double scalar, double* result, int size)
 		result[i] = scalar * vector[i];
 	}
 }
+
 
 double calculate_vector_norm(double *vector, int size) {
 	double result = 0;
@@ -111,12 +113,9 @@ void distribute_matrix(double* matrix, double* chunk_matrix, int chunk_size, int
     if (rank == RANK_ROOT) {
         send_counts = (int *)malloc(sizeof(int) * size);
         offsets = (int *)malloc(sizeof(int) * size);
-        int default_offset = N / size;
         offsets[0] = 0;
         for (int i = 0; i < size; i++) {
-            send_counts[i] = default_offset * N;
-            if (i < N % size)
-                send_counts[i] += N;
+            send_counts[i] = calculate_chunk_size(i, size) * N;
             if (i > 0)
                 offsets[i] = offsets[i - 1] + send_counts[i - 1];
         }
@@ -126,20 +125,15 @@ void distribute_matrix(double* matrix, double* chunk_matrix, int chunk_size, int
 		free(send_counts);
 		free(offsets);
 	}
-
 }
 
 // all processes send chunk_vector and chunks collect in every process
 void collect_vector(double *chunk_vector, double* vector, int chunk_size, int rank, int size) {
-
 	int *recv_counts = (int *)malloc(sizeof(int) * size);
 	int *offsets = (int *)malloc(sizeof(int) * size);
-	int default_offset = N / size;
 	offsets[0] = 0;
 	for (int i = 0; i < size; i++) {
-		recv_counts[i] = default_offset;
-		if (i < N % size)
-			recv_counts[i]++;
+		recv_counts[i] = calculate_chunk_size(i, size);
 		if (i > 0)
 			offsets[i] = offsets[i - 1] + recv_counts[i - 1];
 	}
@@ -198,23 +192,21 @@ int main(int argc, char *argv[]) {
 
 	// parallel_mult_matrix(chunk_matrix_A, vector_u, vector_b, chunk_size, rank, size); 	// Инициализируется вектор b
 	// free(vector_u);
-
-
 	double vector_b_norm = calculate_vector_norm(vector_b, N);
 	double numenator;
 
 	double accuracy = BEGIN_ACCURACY;
+	double* temp_vector = (double*)malloc(sizeof(double) * chunk_size);
+
 	while (accuracy > EPSILON) {
 		matrix_mult_vector(chunk_matrix_A, vector_x, chunk_vector_Ax, N, chunk_size);
 
-		double* temp_vector = (double*)malloc(sizeof(double) * chunk_size);
 		vector_sub_vector(chunk_vector_Ax, vector_b, temp_vector, 0, offset, chunk_size); // Ax - b
 
 		calculate_norm(temp_vector, chunk_size, &numenator);
 
 		accuracy = numenator / vector_b_norm;
 		if (accuracy < EPSILON) {
-			free(temp_vector);		
 			break;
 		}
 		if (rank == RANK_ROOT) {
@@ -226,10 +218,8 @@ int main(int argc, char *argv[]) {
 		vector_sub_vector(vector_x, temp_vector, temp_vector, offset, 0, chunk_size); // Здесь создается кусок вектор x^(n+1)
 		
 		collect_vector(temp_vector, vector_x, chunk_size, rank, size);	// Сбор единого вектора x^(n+1)
-
-		free(temp_vector);		
 	}
-
+	free(temp_vector);		
 
 	if (rank == RANK_ROOT) {
 		print_matrix(vector_b, N, 1);	
