@@ -6,9 +6,9 @@
 
 
 #define BEGIN_ACCURACY 1
-#define N 500
-#define TAU 0.0001
-#define EPSILON 0.01
+#define N 1200
+#define TAU 0.001
+#define EPSILON 0.00001
 #define RANK_ROOT 0
 
 
@@ -30,7 +30,7 @@ int calculate_chunk_size(int rank, int size) {
 }
 
 
-int calculate_offlset(int rank, int size) {
+int calculate_offset(int rank, int size) {
 	int offset = 0;
 	for (int i = 0; i < rank; i++) {
 		offset += calculate_chunk_size(i, size);
@@ -45,6 +45,7 @@ void vector_sub_vector(double* vector_a, double* vector_b, double *result, int o
 	}
 }
 
+
 void vector_mult_scalar(double* vector, double scalar, double* result, int size) {
 	for (int i = 0; i < size; ++i) {
 		result[i] = scalar * vector[i];
@@ -58,14 +59,6 @@ double calculate_vector_norm(double *vector, int size) {
 		result += (vector[i] * vector[i]);
 	}
 	return sqrt(result);
-}
- 
- 
-void init_vector_b(double* vector_b) {
-	srand(time(NULL));
-	for (int i = 0; i < N; ++i) {
-		vector_b[i] = ((double)rand() / RAND_MAX) * (rand() % 2 == 0 ? 1 : -1);
-	}
 }
 
 
@@ -127,8 +120,8 @@ void distribute_matrix(double* matrix, double* chunk_matrix, int chunk_size, int
 	}
 }
 
-// all processes send chunk_vector and chunks collect in every process
-void collect_vector(double *chunk_vector, double* vector, int chunk_size, int rank, int size) {
+// all processes send chunk_vector and chunks collect in every proc-ess
+void collect_vector(double *chunk_vector, double* vector, int chunk_size, int size) {
 	int *recv_counts = (int *)malloc(sizeof(int) * size);
 	int *offsets = (int *)malloc(sizeof(int) * size);
 	offsets[0] = 0;
@@ -144,10 +137,10 @@ void collect_vector(double *chunk_vector, double* vector, int chunk_size, int ra
 }
 
 // chunk matrices multiplicate and result store on every process
-void parallel_mult_matrix(double *matrix, double *vector, double *result_vector, int chunk_size, int rank, int size) {
+void parallel_mult_matrix(double *matrix, double *vector, double *result_vector, int chunk_size, int size) {
 	double* chunk_result_vector = (double*)malloc(sizeof(double) * chunk_size);
 	matrix_mult_vector(matrix, vector, chunk_result_vector, N, chunk_size);
-	collect_vector(chunk_result_vector, result_vector, chunk_size, rank, size);
+	collect_vector(chunk_result_vector, result_vector, chunk_size, size);
 	free(chunk_result_vector);
 }
 
@@ -162,36 +155,45 @@ void calculate_norm(double *vector, int size, double* result) {
 }
 
 
+double vector_difference(double* vector_a, double* vector_b, int size) {
+	vector_sub_vector(vector_a, vector_b, vector_a, 0, 0, size);
+	return calculate_vector_norm(vector_a, size);
+}
+
+
 int main(int argc, char *argv[]) {
 	int size, rank;
 	MPI_Init(&argc, &argv);
 	MPI_Comm_size(MPI_COMM_WORLD, &size);
 	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 	
+	double program_start_time = MPI_Wtime();
+
+
 	int chunk_size = calculate_chunk_size(rank, size);
-	int offset = calculate_offlset(rank, size);
+	int offset = calculate_offset(rank, size);
 	double* matrix_A;
 	double* chunk_vector_Ax = (double*)malloc(sizeof(double) * chunk_size);
 	double* chunk_matrix_A = (double*)malloc(sizeof(double) * N * chunk_size);
 	double* vector_b = (double*)malloc(sizeof(double) * N);;
-	// double* vector_u = (double*)malloc(sizeof(double) * N);
+	double* vector_u = (double*)malloc(sizeof(double) * N);
 	double* vector_x = (double*)malloc(sizeof(double) * N);
+
 
 	init_vector_x(vector_x);
 	if (rank == RANK_ROOT) {
 		matrix_A = (double*)malloc(sizeof(double) * N * N);
 		init_matrix_A(matrix_A);
-		init_vector_b(vector_b);
-		// init_vector_u(vector_u);
+		init_vector_u(vector_u);
 	}
 	distribute_matrix(matrix_A, chunk_matrix_A, chunk_size, rank, size);
-	free(matrix_A);
+	if (rank == RANK_ROOT)
+		free(matrix_A);
 
-	MPI_Bcast(vector_b, N, MPI_DOUBLE, RANK_ROOT, MPI_COMM_WORLD);
-	// MPI_Bcast(vector_u, N, MPI_DOUBLE, RANK_ROOT, MPI_COMM_WORLD);
+	MPI_Bcast(vector_u, N, MPI_DOUBLE, RANK_ROOT, MPI_COMM_WORLD);
 
-	// parallel_mult_matrix(chunk_matrix_A, vector_u, vector_b, chunk_size, rank, size); 	// Инициализируется вектор b
-	// free(vector_u);
+	parallel_mult_matrix(chunk_matrix_A, vector_u, vector_b, chunk_size, size); 	// Инициализируется вектор b
+	free(vector_u);
 	double vector_b_norm = calculate_vector_norm(vector_b, N);
 	double numenator;
 
@@ -217,13 +219,15 @@ int main(int argc, char *argv[]) {
 	
 		vector_sub_vector(vector_x, temp_vector, temp_vector, offset, 0, chunk_size); // Здесь создается кусок вектор x^(n+1)
 		
-		collect_vector(temp_vector, vector_x, chunk_size, rank, size);	// Сбор единого вектора x^(n+1)
+		collect_vector(temp_vector, vector_x, chunk_size, size);	// Сбор единого вектора x^(n+1)
 	}
 	free(temp_vector);		
 
+
 	if (rank == RANK_ROOT) {
-		print_matrix(vector_b, N, 1);	
-		print_matrix(vector_x, N, 1);		
+		print_matrix(vector_b, N, 1);
+		print_matrix(vector_x, N, 1);
+		printf("Result: %lf\nTime: %lf\n", vector_difference(vector_b, vector_x, N), MPI_Wtime() - program_start_time);
 	}
 
 	free(vector_b);
