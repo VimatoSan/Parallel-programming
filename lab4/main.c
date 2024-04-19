@@ -2,6 +2,7 @@
 #include <mpi.h>
 #include <stdlib.h>
 
+
 #define RANK_ROOT 0
 #define Dx 2
 #define Dy 2
@@ -9,9 +10,9 @@
 #define x0 -1
 #define y0 -1
 #define z0 -1
-#define Nx 150
-#define Ny 100
-#define Nz 120    
+#define Nx 120
+#define Ny 150
+#define Nz 170
 #define BEGIN_PHI 0
 #define ALPHA 100000
 #define EPSILON 0.00000001
@@ -63,60 +64,60 @@ double func_ro(double x, double y, double z) {
     return 6.0 - ALPHA * func_phi(x, y, z);
 }
 
-void fill_inner(double *subspace, int chunk_size) {
+void fill_inner(double *space, int chunk_size) {
     for (int k = 1; k < chunk_size - 1; ++k) {
         for (int j = 1; j < Ny - 1; ++j) {
             for (int i = 1; i < Nx - 1; ++i) {
-                subspace[k * Nx * Ny + j * Nx + i] = BEGIN_PHI; 
+                space[k * Nx * Ny + j * Nx + i] = BEGIN_PHI; 
             }
         }
     }
 }
 
-void fill_borders(double *subspace, int chunk_size, steps *st) {
+void fill_borders(double *space, int chunk_size, steps *st) {
     for (int k = 0; k < chunk_size; ++k) { // i = 0
         for (int j = 0; j < Ny; ++j) {
-            subspace[k * Nx * Ny + j * Nx] = func_phi(x0, y0 + j * st->y, z0 + (k + st->offset_z) * st->z); 
+            space[k * Nx * Ny + j * Nx] = func_phi(x0, y0 + j * st->y, z0 + (k + st->offset_z) * st->z); 
         }
     }
     for (int k = 0; k < chunk_size; ++k) { // i = Nx
         for (int j = 0; j < Ny; ++j) {
-            subspace[k * Nx * Ny + j * Nx + Nx - 1] = func_phi(x0 + (Nx - 1) * st->x, y0 + j * st->y, z0 + (k + st->offset_z) * st->z); 
+            space[k * Nx * Ny + j * Nx + Nx - 1] = func_phi(x0 + (Nx - 1) * st->x, y0 + j * st->y, z0 + (k + st->offset_z) * st->z); 
         }
     }
     for (int k = 0; k < chunk_size; ++k) { // j = 0
         for (int i = 0; i < Nx; ++i) {
-            subspace[k * Nx * Ny + i] = func_phi(x0 + i * st->x, y0, z0 + (k + st->offset_z) * st->z); 
+            space[k * Nx * Ny + i] = func_phi(x0 + i * st->x, y0, z0 + (k + st->offset_z) * st->z); 
         }
     }
     for (int k = 0; k < chunk_size; ++k) { // j = Ny
         for (int i = 0; i < Nx; ++i) {
-            subspace[k * Nx * Ny + (Ny - 1) * Nx + i] = func_phi(x0 + i * st->x, y0 + (Ny - 1) * st->y, z0 + (k + st->offset_z) * st->z); 
+            space[k * Nx * Ny + (Ny - 1) * Nx + i] = func_phi(x0 + i * st->x, y0 + (Ny - 1) * st->y, z0 + (k + st->offset_z) * st->z); 
         }
     }
     for (int j = 0; j < Ny; ++j) { // k = 0
         for (int i = 0; i < Nx; ++i) {
-            subspace[j * Nx + i] = func_phi(x0 + i * st->x, y0 + j * st->y, z0 + st->offset_z * st->z); 
+            space[j * Nx + i] = func_phi(x0 + i * st->x, y0 + j * st->y, z0 + st->offset_z * st->z); 
         }
     }
     for (int j = 0; j < Ny; ++j) { // k = Nz
         for (int i = 0; i < Nx; ++i) {
-            subspace[(chunk_size - 1) * Ny * Nx + j * Nx + i] = func_phi(x0 + i * st->x, y0 + j * st->y, z0 + (st->offset_z  + chunk_size) * st->z); 
+            space[(chunk_size - 1) * Ny * Nx + j * Nx + i] = func_phi(x0 + i * st->x, y0 + j * st->y, z0 + (st->offset_z  + chunk_size - 1) * st->z); 
         }
     }
 }
 
 void init_buffers(double *lower_buffer, double *upper_buffer, int rank, int size) {
     if (rank == RANK_ROOT) {
-        for (int i = 0; i < (Nx - 2) * (Ny - 2); ++i)
+        for (int i = 0; i < Nx * Ny; ++i)
             upper_buffer[i] = BEGIN_PHI;
     }
     else if (rank == size - 1) {
-        for (int i = 0; i < (Nx - 2) * (Ny - 2); ++i)
+        for (int i = 0; i < Nx * Ny; ++i)
             lower_buffer[i] = BEGIN_PHI;
     }
     else {
-        for (int i = 0; i < (Nx - 2) * (Ny - 2); ++i) {
+        for (int i = 0; i < Nx * Ny; ++i) {
             upper_buffer[i] = BEGIN_PHI;
             lower_buffer[i] = BEGIN_PHI;
         }
@@ -136,87 +137,59 @@ void calc_max_delta(double prev, double cur, double *max_delta) {
     }
 }
 
-// double approximate_phi(double *subspace, int i, int j, int k,steps *st ) {
-//     return (1 / ((2.0 / (st->x * st->x)) + (2.0 / (st->y * st->y)) + (2.0 / (st->z * st->z)) + ALPHA))
-//                 * (((subspace[k * Nx * Ny + j * Nx + i + 1] + subspace[k * Nx * Ny + j * Nx + i - 1]) / (st->x * st->x)) 
-//                 + ((subspace[k * Nx * Ny + (j + 1)* Nx + i] + subspace[k * Nx * Ny + (j - 1) * Nx + i]) / (st->y * st->y)) 
-//                 + ((subspace[(k + 1) * Nx * Ny + j * Nx + i] + subspace[(k - 1) * Nx * Ny + j * Nx + i]) / (st->z * st->z)) - func_ro(x0 + i * st->x, y0 + j * st->y, z0 + (k + st->offset_z) * st->z));  
-// }
-
-
-void calc_borders(double *subspace, double *buffer_space, double *lower_buffer, double *upper_buffer, MPI_Request *send_lower_buff, MPI_Request *send_upper_buff, MPI_Datatype *inner_layer, steps *st, int chunk_size, double *max_delta, int rank, int size) {
-    double new_phi;
-    // Нижняя грань пространства;
-    if (rank != RANK_ROOT) {
-        // printf("rank - %d\n", rank);
-        // Верхнего значения может не быть, нужно брать из верхнего буфера
-        for (int j = 1; j < Ny - 1; ++j) {
-            for (int i = 1; i < Nx - 1; ++i) {
-                // printf("first mul = %lf\n",(1.0 / ((2.0 / (st->x * st->x)) + (2.0 / (st->y * st->y)) + (2.0 / (st->z * st->z)) + ALPHA)));
-                // printf("%lf, %lf, %lf, %lf, %lf, %lf\n", subspace[j * Nx + i + 1], subspace[j * Nx + i - 1], subspace[(j + 1) * Nx + i], subspace[(j - 1) * Nx + i], lower_buffer[(j - 1) * (Nx - 2) + i - 1], subspace[Nx * Ny + j * Nx + i]);
-                new_phi = (1.0 / ((2.0 / (st->x * st->x)) + (2.0 / (st->y * st->y)) + (2.0 / (st->z * st->z)) + ALPHA))
-                * (((subspace[j * Nx + i + 1] + subspace[j * Nx + i - 1]) / (st->x * st->x)) 
-                + ((subspace[(j + 1) * Nx + i] + subspace[(j - 1) * Nx + i]) / (st->y * st->y)) 
-                + ((lower_buffer[(j - 1) * (Nx - 2) + i - 1] + subspace[Nx * Ny + j * Nx + i]) / (st->z * st->z)) - func_ro(x0 + i * st->x, y0 + j * st->y, z0 + st->offset_z * st->z));    
-                buffer_space[j * Nx + i] = new_phi;
-                // printf("1: prev - %lf, cur - %lf\n", subspace[j * Nx + i], new_phi);
-                calc_max_delta(subspace[j * Nx + i], new_phi, max_delta);
-            }
-        }
-        MPI_Isend(&buffer_space[Nx + 1], 1, *inner_layer, rank - 1, 123, MPI_COMM_WORLD, send_lower_buff);
-    }
-
-    // Верхняя грань пространства
-    if (rank != (size - 1)) {
-        // Здесь может не быть нижнего буфера, если chunk_size == 1
-        for (int j = 1; j < Ny - 1; ++j) {
-            for (int i = 1; i < Nx - 1; ++i) {
-                new_phi = (1.0 / ((2.0 / (st->x * st->x)) + (2.0 / (st->y * st->y)) + (2.0 / (st->z * st->z)) + ALPHA))
-                * (((subspace[(chunk_size - 1) * Nx * Ny + j * Nx + i + 1] + subspace[(chunk_size - 1) * Nx * Ny + j * Nx + i - 1]) / (st->x * st->x)) 
-                + ((subspace[(chunk_size - 1) * Nx * Ny + (j + 1)* Nx + i] + subspace[(chunk_size - 1) * Nx * Ny + (j - 1) * Nx + i]) / (st->y * st->y)) 
-                + ((upper_buffer[(j - 1) * (Nx - 2) + i - 1] + subspace[(chunk_size - 2) * Nx * Ny + j * Nx + i]) / (st->z * st->z)) - func_ro(x0 + i * st->x, y0 + j * st->y, z0 + (st->offset_z + chunk_size) * st->z));
-                buffer_space[(chunk_size - 1) * Ny * Nx + j * Nx + i] = new_phi;
-                // printf("0: prev - %lf, cur - %lf\n", subspace[(chunk_size - 1) * Nx * Ny + j * Nx + i], new_phi);
-
-                calc_max_delta(subspace[(chunk_size - 1) * Ny * Nx + j * Nx + i], new_phi, max_delta);
-            }
-        }
-        MPI_Isend(&buffer_space[(chunk_size - 1) * Nx * Ny + Nx + 1], 1, *inner_layer, rank + 1, 123, MPI_COMM_WORLD, send_upper_buff);
-    }
+double approximate_phi(int x, int y, int z, steps *st, double x_left, double x_right, double y_left, double y_right, double z_left, double z_right) {
+    return (1.0 / ((2.0 / (st->x * st->x)) + (2.0 / (st->y * st->y)) + (2.0 / (st->z * st->z)) + ALPHA))
+                * (((x_left + x_right) / (st->x * st->x)) + ((y_left + y_right) / (st->y * st->y)) + ((z_left + z_right) / (st->z * st->z))
+                - func_ro(x0 + x * st->x, y0 + y * st->y, z0 + z * st->z));
 }
 
+void calc_lower_border(double *prev_space, double *cur_space, double *lower_buffer, MPI_Request *send_lower_buff, MPI_Request *recv_lower_buff, steps *st, double *max_delta, int rank) {
+    double new_phi;
+    for (int j = 1; j < Ny - 1; ++j) {
+        for (int i = 1; i < Nx - 1; ++i) {
+            new_phi = approximate_phi(i, j, st->offset_z, st, prev_space[j * Nx + i - 1], prev_space[j * Nx + i + 1], 
+                prev_space[(j - 1) * Nx + i], prev_space[(j + 1) * Nx + i], lower_buffer[j * Nx + i], prev_space[Nx * Ny + j * Nx + i]);
 
-void calc_inners(double *subspace, double *buffer_space, steps *st, int chunk_size, double *max_delta, int rank, int size) {
+            cur_space[j * Nx + i] = new_phi;
+            calc_max_delta(prev_space[j * Nx + i], new_phi, max_delta);
+        }
+    }
+    MPI_Isend(&cur_space[0], Ny * Nx, MPI_DOUBLE, rank - 1, 123, MPI_COMM_WORLD, send_lower_buff);
+    MPI_Irecv(lower_buffer, Nx * Ny, MPI_DOUBLE, rank - 1, 123, MPI_COMM_WORLD, recv_lower_buff);
+}
+
+void calc_upper_border(double *prev_space, double *cur_space, double *upper_buffer, MPI_Request *send_upper_buff, MPI_Request *recv_upper_buff, steps *st, double *max_delta, int chunk_size, int rank) {
+    double new_phi;
+    for (int j = 1; j < Ny - 1; ++j) {
+        for (int i = 1; i < Nx - 1; ++i) {
+            new_phi = approximate_phi(i, j, st->offset_z + chunk_size - 1, st,
+                prev_space[(chunk_size - 1) * Nx * Ny + j * Nx + i - 1], prev_space[(chunk_size - 1) * Nx * Ny + j * Nx + i + 1], 
+                prev_space[(chunk_size - 1) * Nx * Ny + (j - 1)* Nx + i], prev_space[(chunk_size - 1) * Nx * Ny + (j + 1)* Nx + i],
+                prev_space[(chunk_size - 2) * Nx * Ny + j * Nx + i], upper_buffer[j * Nx + i]);
+            cur_space[(chunk_size - 1) * Ny * Nx + j * Nx + i] = new_phi;
+
+            calc_max_delta(prev_space[(chunk_size - 1) * Ny * Nx + j * Nx + i], new_phi, max_delta);
+        }
+    }
+    MPI_Isend(&cur_space[(chunk_size - 1) * Nx * Ny], Ny * Nx, MPI_DOUBLE, rank + 1, 123, MPI_COMM_WORLD, send_upper_buff);
+    MPI_Irecv(upper_buffer, Nx * Ny, MPI_DOUBLE, rank + 1, 123, MPI_COMM_WORLD, recv_upper_buff);
+}
+
+void calc_inners(double *prev_space, double *cur_space, steps *st, int chunk_size, double *max_delta, int rank, int size) {
     double new_phi;
     for (int k = 1; k < chunk_size - 1; ++k) {
         for (int j = 1; j < Ny - 1; ++j) {
             for (int i = 1; i < Nx - 1; ++i) {
-                //printf("%lf, %lf, %lf, %lf, %lf, %lf\n", subspace[j * Nx + i + 1], subspace[j * Nx + i - 1], subspace[(j + 1) * Nx + i], subspace[(j - 1) * Nx + i], subspace[(k + 1) * Nx * Ny + j * Nx + i], subspace[Nx * Ny + j * Nx + i]);
-                new_phi = (1.0 / ((2.0 / (st->x * st->x)) + (2.0 / (st->y * st->y)) + (2.0 / (st->z * st->z)) + ALPHA))
-                * (((subspace[k * Nx * Ny + j * Nx + i + 1] + subspace[k * Nx * Ny + j * Nx + i - 1]) / (st->x * st->x)) 
-                + ((subspace[k * Nx * Ny + (j + 1)* Nx + i] + subspace[k * Nx * Ny + (j - 1) * Nx + i]) / (st->y * st->y)) 
-                + ((subspace[(k + 1) * Nx * Ny + j * Nx + i] + subspace[(k - 1) * Nx * Ny + j * Nx + i]) / (st->z * st->z)) - func_ro(x0 + i * st->x, y0 + j * st->y, z0 + (k + st->offset_z) * st->z));            
-                buffer_space[k * Nx * Ny + j * Nx + i] = new_phi; 
-                calc_max_delta(subspace[k * Ny * Nx + j * Nx + i], new_phi, max_delta);
+                new_phi = approximate_phi(i, j, st->offset_z + k, st,
+                    prev_space[k * Nx * Ny + j * Nx + i - 1], prev_space[k * Nx * Ny + j * Nx + i + 1], 
+                    prev_space[k * Nx * Ny + (j - 1) * Nx + i], prev_space[k * Nx * Ny + (j + 1)* Nx + i],
+                    prev_space[(k - 1) * Nx * Ny + j * Nx + i], prev_space[(k + 1) * Nx * Ny + j * Nx + i]);
+                cur_space[k * Nx * Ny + j * Nx + i] = new_phi; 
+                calc_max_delta(prev_space[k * Ny * Nx + j * Nx + i], new_phi, max_delta);
             }
         }
     }
 }
-
-
-void recv_buffers(MPI_Request *recv_lower_buff, MPI_Request *recv_upper_buff, double *lower_buffer, double *upper_buffer, int rank, int size) {
-    // printf("Start recv - %d\n", rank);
-    if (rank != RANK_ROOT) {
-        MPI_Irecv(lower_buffer, (Nx - 2) * (Ny - 2), MPI_DOUBLE, rank - 1, 123, MPI_COMM_WORLD, recv_lower_buff);
-        // MPI_Wait(upper_request, MPI_STATUS_IGNORE);
-    }
-
-    if (rank != size - 1) {
-        MPI_Irecv(upper_buffer, (Nx - 2) * (Ny - 2), MPI_DOUBLE, rank + 1, 123, MPI_COMM_WORLD, recv_upper_buff);
-        // MPI_Wait(lower_request, MPI_STATUS_IGNORE);
-    }
-}
-
 
 void wait_buffer_swap(MPI_Request *send_lower_buff, MPI_Request *send_upper_buff, MPI_Request *recv_lower_buff, MPI_Request *recv_upper_buff, int rank, int size) {
     if (rank != RANK_ROOT) {
@@ -230,6 +203,17 @@ void wait_buffer_swap(MPI_Request *send_lower_buff, MPI_Request *send_upper_buff
     }
 }
 
+void print_correct_phi(steps *st, int chunk_size) {
+    for (int k = 0; k < chunk_size; k++) {
+        printf("layer %d\n", k);
+        for (int j = 0; j < Ny; ++j) {
+            for (int i = 0; i < Nx; i++) {
+                printf("%lf ", func_phi(x0 + i * st->x, y0 + j * st->y, z0 + (k + st->offset_z) * st->z));
+            }
+            printf("\n");
+        }
+    }
+}
 
 void print_space(double *subspace, int chunk_size) {
     for (int k = 0; k < chunk_size; ++k) {
@@ -243,6 +227,15 @@ void print_space(double *subspace, int chunk_size) {
     }
 }
 
+void check_accuracy(double *prev_space, steps *st, int chunk_size, double *local_delta) {
+    for (int k = 0; k < chunk_size; k++) {
+        for (int j = 0; j < Ny; ++j) {
+            for (int i = 0; i < Nx; i++) {
+                calc_max_delta(prev_space[k * Nx * Ny + j * Nx + i], func_phi(x0 + i * st->x, y0 + j * st->y, z0 + (k + st->offset_z) * st->z), local_delta);
+            }
+        }
+    }
+}
 
 int main(int argc, char *argv[]) {
 	MPI_Init(&argc, &argv);
@@ -262,21 +255,18 @@ int main(int argc, char *argv[]) {
 
     chunk_size = calculate_chunk_size(rank, size);
     if (rank == RANK_ROOT) {
-        upper_buffer = malloc(sizeof(double) * (Nx - 2) * (Ny - 2));
+        upper_buffer = malloc(sizeof(double) * Nx * Ny);
     }
     else if (rank == size - 1) {
-        lower_buffer = malloc(sizeof(double) * (Nx - 2) * (Ny - 2));
+        lower_buffer = malloc(sizeof(double) * Nx * Ny);
     }
     else {
-        upper_buffer = malloc(sizeof(double) * (Nx - 2) * (Ny - 2));
-        lower_buffer = malloc(sizeof(double) * (Nx - 2) * (Ny - 2));
+        upper_buffer = malloc(sizeof(double) * Nx * Ny);
+        lower_buffer = malloc(sizeof(double) * Nx * Ny);
     }
     double *prev_space = malloc(sizeof(double) * Nx * Ny * chunk_size);
     double *cur_space = malloc(sizeof(double) * Nx * Ny * chunk_size);
     fill_borders(prev_space, chunk_size, &st);
-    // if (rank == RANK_ROOT) {
-    //     print_space(subspace, chunk_size);
-    // }
     fill_borders(cur_space, chunk_size, &st);
     fill_inner(prev_space, chunk_size);
 
@@ -284,62 +274,35 @@ int main(int argc, char *argv[]) {
 
     MPI_Request send_upper_buff;
     MPI_Request send_lower_buff;
-    MPI_Request recv_lower_buff;
     MPI_Request recv_upper_buff;
+    MPI_Request recv_lower_buff;
 
-
-    MPI_Datatype inner_layer;
-    MPI_Type_vector(Ny - 2, Nx - 2, Nx, MPI_DOUBLE, &inner_layer);
-    MPI_Type_commit(&inner_layer);
-
-    int iterations = 999999;
-    while (max_delta > EPSILON && iterations > 0) {
+    while (max_delta > EPSILON) {
         local_delta = 0;
-        iterations--;
-        calc_borders(prev_space, cur_space, lower_buffer, upper_buffer, &send_lower_buff, &send_upper_buff, &inner_layer, &st, chunk_size, &local_delta, rank, size);
-        recv_buffers(&recv_lower_buff, &recv_upper_buff, lower_buffer, upper_buffer, rank, size); // Прием ассинхронных запросов
-
-        //printf("local delta - %lf\n", local_delta);
+        if (rank != RANK_ROOT) 
+            calc_lower_border(prev_space, cur_space, lower_buffer, &send_lower_buff, &recv_lower_buff, &st, &max_delta, rank);
+        if (rank != size - 1)
+            calc_upper_border(prev_space, cur_space, upper_buffer, &send_upper_buff, &recv_upper_buff, &st, &max_delta, chunk_size, rank);
         calc_inners(prev_space, cur_space, &st, chunk_size, &local_delta, rank, size);
-        //printf("local delta - %lf\n", local_delta);
 
         MPI_Allreduce(&local_delta, &max_delta, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
         if (rank == RANK_ROOT)
             printf("accuracy - %.10lf\n", max_delta);
-        
-        // print_space(subspace, chunk_size);
         swap(&cur_space, &prev_space); 
         wait_buffer_swap(&send_lower_buff, &send_upper_buff, &recv_lower_buff, &recv_upper_buff, rank, size);
     }
-    local_delta = 0;
-    for (int k = 0; k < chunk_size; k++) {
-        for (int j = 0; j < Ny; ++j) {
-            for (int i = 0; i < Nx; i++) {
-                calc_max_delta(prev_space[k * Nx * Ny + j * Nx + i], func_phi(x0 + i * st.x, y0 + j * st.y, z0 + (k + st.offset_z) * st.z), &local_delta);
-            }
-        }
-    }
-    // printf("proc - %d, delta - %lf\n", rank, local_delta);
 
+    local_delta = 0;
+    check_accuracy(prev_space, &st, chunk_size, &local_delta);
 
     MPI_Allreduce(&local_delta, &max_delta, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
     if (rank == RANK_ROOT)
         printf("Delta - %.10lf\n", max_delta);
-    MPI_Type_free(&inner_layer);
-    MPI_Barrier(MPI_COMM_WORLD);
-    // if (rank == RANK_ROOT) {
-    //     print_space(subspace, chunk_size);
-    //     // for (int k = 0; k < chunk_size; k++) {
-    //     //     printf("layer %d\n", k);
-    //     //     for (int j = 0; j < Ny; ++j) {
-    //     //         for (int i = 0; i < Nx; i++) {
-    //     //             printf("%lf ", func_phi(x0 + i * st.x, y0 + j * st.y, z0 + (k + st.offset_z) * st.z));
-    //     //         }
-    //     //         printf("\n");
-    //     //     }
-    //     // }
+    // MPI_Barrier(MPI_COMM_WORLD);
+    // if (rank == 0) {
+    //     print_space(prev_space, chunk_size);
+    //     print_correct_phi(&st, chunk_size);
     // }
-    // printf("rank - %d\n", rank);
 
     free(prev_space);
     free(cur_space);
